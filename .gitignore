@@ -1,0 +1,22 @@
+# Entornos virtuales
+venv/
+.env
+.env.*
+
+# Dependencias
+requirements.txt
+
+# Archivos de datos
+*.csv
+*.xlsx
+*.xls
+*.json
+
+# Cachés de Python
+__pycache__/
+*.pyc
+
+# Logs y temporales
+*.log
+*.tmp
+*.bak
