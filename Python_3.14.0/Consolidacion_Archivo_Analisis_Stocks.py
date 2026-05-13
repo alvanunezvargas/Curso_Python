@@ -14,21 +14,21 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 BASE_PATH = Path(
     "/mnt/c/Users/Alvaro/OneDrive/Documentos/Curso MIT McKinseay IFP/"
-    "Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-11"
+    "Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-12"
 )
 
 FILES = {
-    "Vista 1": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 1 - 2026-05-11.xlsx",
-    "Vista 2": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 2 - 2026-05-11.xlsx",
-    "Vista 3": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 3 - 2026-05-11.xlsx",
-    "Vista 4": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 4 - 2026-05-11.xlsx",
+    "Vista 1": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 1 - 2026-05-12.xlsx",
+    "Vista 2": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 2 - 2026-05-12.xlsx",
+    "Vista 3": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 3 - 2026-05-12.xlsx",
+    "Vista 4": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 4 - 2026-05-12.xlsx",
 }
 
 RESTRICTED_FILE = BASE_PATH / "Restricted_Final.xlsx"
 
 OUTPUT_FILE = (
     BASE_PATH /
-    "Quality Value Defensive - Morningstar Barbell 2026-05-11.xlsx"
+    "Quality Value Defensive - Morningstar Barbell 2026-05-12.xlsx"
 )
 
 # =========================================================
