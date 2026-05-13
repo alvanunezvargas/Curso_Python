@@ -1,4 +1,4 @@
 {
-    "python.defaultInterpreterPath": "/home/alvaro/Python/Curso_Python/Python_3.10.20/financial_table_ocr/venv_financial_ocr/bin/python",
-    "git.ignoreLimitWarning": true
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv_financial_ocr/bin/python",
+    "python.terminal.activateEnvironment": true
 }
