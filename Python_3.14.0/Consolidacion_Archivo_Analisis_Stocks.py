@@ -14,21 +14,21 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 BASE_PATH = Path(
     "/mnt/c/Users/Alvaro/OneDrive/Documentos/Curso MIT McKinseay IFP/"
-    "Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-12"
+    "Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-13"
 )
 
 FILES = {
-    "Vista 1": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 1 - 2026-05-12.xlsx",
-    "Vista 2": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 2 - 2026-05-12.xlsx",
-    "Vista 3": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 3 - 2026-05-12.xlsx",
-    "Vista 4": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 4 - 2026-05-12.xlsx",
+    "Vista 1": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 1 - 2026-05-13.xlsx",
+    "Vista 2": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 2 - 2026-05-13.xlsx",
+    "Vista 3": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 3 - 2026-05-13.xlsx",
+    "Vista 4": BASE_PATH / "Quality Value Defensive - Morningstar Barbell - Vista 4 - 2026-05-13.xlsx",
 }
 
 RESTRICTED_FILE = BASE_PATH / "Restricted_Final.xlsx"
 
 OUTPUT_FILE = (
     BASE_PATH /
-    "Quality Value Defensive - Morningstar Barbell 2026-05-12.xlsx"
+    "Quality Value Defensive - Morningstar Barbell 2026-05-13.xlsx"
 )
 
 # =========================================================
@@ -172,6 +172,29 @@ def reorder_identity_columns(df):
     return df[existing_first + remaining_cols]
 
 
+def rename_investingpro_fair_value_columns(df):
+    """
+    Renombra columnas de Fair Value provenientes de InvestingPro
+    solo para Vista 1.
+    """
+
+    rename_map = {
+        "Fair Value": "Fair Value (InvestingPro)",
+        "Fair Value Label": "Fair Value Label (InvestingPro)",
+        "Fair Value Confidence": "Fair Value Confidence (InvestingPro)",
+    }
+
+    df = df.rename(
+        columns={
+            old: new
+            for old, new in rename_map.items()
+            if old in df.columns
+        }
+    )
+
+    return df
+
+
 def prepare_restricted_dataframe(file_path, identity_map):
     if not file_path.exists():
         raise FileNotFoundError(
@@ -251,6 +274,18 @@ for sheet_name, file_path in FILES.items():
         engine="openpyxl"
     )
 
+    # =====================================================
+    # RECORTE ESTRUCTURAL
+    # =====================================================
+    # Eliminar:
+    # - filas 1-7
+    # - columnas A-B
+    #
+    # Resultado:
+    # - fila 8 = headers
+    # - columna C = inicio tabla
+    # =====================================================
+
     raw = raw.iloc[7:, 2:]
 
     headers = raw.iloc[0]
@@ -275,7 +310,22 @@ for sheet_name, file_path in FILES.items():
 
     raw = clean_dataframe(raw)
 
+    # =====================================================
+    # AJUSTES ESPECÍFICOS DE VISTA 1
+    # =====================================================
+
     if sheet_name == "Vista 1":
+
+        # -------------------------------------------------
+        # RENOMBRAR FAIR VALUE DE INVESTINGPRO
+        # -------------------------------------------------
+
+        raw = rename_investingpro_fair_value_columns(raw)
+
+        # -------------------------------------------------
+        # ELIMINAR COLUMNAS NO DESEADAS
+        # -------------------------------------------------
+
         cols_remove = [
             "Fair Value (Analyst Target)",
             "Analyst Price Target Count",
