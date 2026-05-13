@@ -64,6 +64,12 @@ MANUAL_HEADERS = [
 ]
 
 # ============================================
+# COLUMNA ESTRUCTURAL QUE PUEDE NO SER DETECTADA
+# ============================================
+
+OPTIONAL_MISSING_HEADER = "Impairment of Goodwill"
+
+# ============================================
 # FUNCIONES
 # ============================================
 
@@ -210,6 +216,35 @@ def convert_financial_value(value):
     except:
 
         return str(value).strip()
+
+
+def insert_missing_structural_column(
+    df,
+    missing_header,
+    local_position,
+    source_name
+):
+    """
+    Inserta una columna estructural faltante con NA.
+    Se usa cuando PaddleOCR no detecta una columna completa
+    porque todos sus valores eran guiones.
+    """
+
+    print("\n===================================")
+    print("INSERCIÓN DE COLUMNA ESTRUCTURAL")
+    print("===================================")
+    print(f"Archivo: {source_name}")
+    print(f"Columna insertada: {missing_header}")
+    print(f"Posición local: {local_position}")
+    print("Valor asignado: NA")
+
+    df.insert(
+        local_position,
+        missing_header,
+        pd.NA
+    )
+
+    return df
 
 
 def assign_header_slice(df, headers_slice, source_name):
@@ -394,6 +429,11 @@ for file in body_files:
 
     total_detected_columns += cols
 
+expected_total_columns = len(MANUAL_HEADERS)
+missing_header_index = MANUAL_HEADERS.index(
+    OPTIONAL_MISSING_HEADER
+)
+
 print("\n===================================")
 print("VALIDACIÓN GLOBAL DE COLUMNAS")
 print("===================================")
@@ -406,29 +446,54 @@ for item in file_shapes:
     )
 
 print(f"\nTotal detectado: {total_detected_columns}")
-print(f"Total esperado: {len(MANUAL_HEADERS)}")
+print(f"Total esperado: {expected_total_columns}")
 
-if total_detected_columns != len(MANUAL_HEADERS):
+# ============================================
+# DETERMINAR SI SE DEBE INSERTAR COLUMNA FALTANTE
+# ============================================
+
+insert_optional_missing_column = False
+
+if total_detected_columns == expected_total_columns:
+
+    print("\nOK -> Se detectaron todas las columnas esperadas.")
+
+elif total_detected_columns == expected_total_columns - 1:
+
+    insert_optional_missing_column = True
+
+    print("\nADVERTENCIA:")
+    print(
+        f"Se detectó una columna menos. "
+        f"Se asumirá que la columna faltante es: "
+        f"{OPTIONAL_MISSING_HEADER}"
+    )
+
+else:
 
     raise ValueError(
         "\n❌ ERROR GLOBAL DE COLUMNAS\n"
         f"Total detectado: {total_detected_columns}\n"
-        f"Total esperado: {len(MANUAL_HEADERS)}\n"
+        f"Total esperado: {expected_total_columns}\n"
+        "Solo se permite una columna faltante si corresponde a "
+        f"'{OPTIONAL_MISSING_HEADER}'.\n"
         "Revisa si alguna imagen perdió, fusionó o creó columnas extra."
     )
 
 # ============================================
-# CARGAR, ASIGNAR HEADERS Y NORMALIZAR
+# CARGAR, INSERTAR COLUMNA FALTANTE SI APLICA,
+# ASIGNAR HEADERS Y NORMALIZAR
 # ============================================
 
 dfs = []
 
 header_start = 0
+missing_inserted = False
 
 for item in file_shapes:
 
     file = item["file"]
-    col_count = item["columns"]
+    detected_col_count = item["columns"]
 
     print(f"\nProcesando: {file.name}")
 
@@ -443,7 +508,49 @@ for item in file_shapes:
         print(f"Archivo vacío: {file.name}")
         continue
 
-    header_end = header_start + col_count
+    # ========================================
+    # SI FALTA IMPAIRMENT OF GOODWILL
+    # ========================================
+
+    col_count_for_header_slice = detected_col_count
+
+    if insert_optional_missing_column and not missing_inserted:
+
+        # La columna faltante está en este bloque si su índice global
+        # cae entre el inicio esperado de este bloque y el final esperado
+        # considerando que esta imagen podría estar perdiendo una columna.
+
+        expected_block_start = header_start
+        expected_block_end_if_missing_here = (
+            header_start +
+            detected_col_count
+        )
+
+        if (
+            missing_header_index >= expected_block_start
+            and
+            missing_header_index <= expected_block_end_if_missing_here
+        ):
+
+            local_position = (
+                missing_header_index -
+                expected_block_start
+            )
+
+            df = insert_missing_structural_column(
+                df=df,
+                missing_header=OPTIONAL_MISSING_HEADER,
+                local_position=local_position,
+                source_name=file.stem
+            )
+
+            col_count_for_header_slice = (
+                detected_col_count + 1
+            )
+
+            missing_inserted = True
+
+    header_end = header_start + col_count_for_header_slice
 
     headers_slice = MANUAL_HEADERS[
         header_start:header_end
@@ -462,6 +569,18 @@ for item in file_shapes:
     )
 
     header_start = header_end
+
+# ============================================
+# VALIDAR QUE LA COLUMNA FALTANTE FUE INSERTADA
+# ============================================
+
+if insert_optional_missing_column and not missing_inserted:
+
+    raise ValueError(
+        "\n❌ ERROR\n"
+        f"Se esperaba insertar la columna '{OPTIONAL_MISSING_HEADER}', "
+        "pero no se pudo determinar en qué archivo correspondía."
+    )
 
 if len(dfs) == 0:
 
