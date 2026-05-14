@@ -26,18 +26,12 @@ NUMBER_FORMAT = "#,##0.00"
 INTEGER_FORMAT = "#,##0"
 YEAR_FORMAT = "0"
 
-SKIP_SHEETS = {
-    "Data_Cleaning_Log",
-    "Missing_Data_Log",
-    "Structure_Log",
-}
-
 
 # ============================================================
-# REGLAS DE INTERPRETACIÓN
+# REGLAS DE RENOMBRAMIENTO DE VARIABLES
 # ============================================================
 
-# Variables de la hoja Growth que deben renombrarse agregando %
+# Hoja Growth: variables de columna A que deben convertirse en porcentuales.
 GROWTH_PERCENT_VARIABLES = {
     "year over year": "Year Over Year %",
     "3-year average": "3-Year Average %",
@@ -46,7 +40,22 @@ GROWTH_PERCENT_VARIABLES = {
     "year average": "Year Average %",
 }
 
-# Variables absolutas que NO deben tratarse como porcentaje aunque Excel las muestre así.
+# Hoja Financial Health
+FINANCIAL_HEALTH_RENAMES = {
+    "cap ex as a % of sales": "Cap Ex as a % of Sales %",
+}
+
+# Hoja Ratios de Cash Flow
+CASH_FLOW_RATIO_RENAMES = {
+    "operating cash flow growth % yoy": "Operating Cash Flow Growth % YOY %",
+    "free cash flow growth % yoy": "Free Cash Flow Growth % YOY %",
+}
+
+
+# ============================================================
+# VARIABLES ABSOLUTAS QUE NO DEBEN SER PORCENTAJE
+# ============================================================
+
 ABSOLUTE_VALUE_VARIABLE_EXCEPTIONS = {
     "net cash flow from continuing operating activities, indirect",
     "cash from operations",
@@ -109,7 +118,7 @@ def normalize_text(value) -> str:
 
 
 def normalize_key(value) -> str:
-    """Normaliza para comparar nombres de variables/columnas."""
+    """Normaliza para comparar nombres de variables, columnas y hojas."""
     return normalize_text(value).lower()
 
 
@@ -186,36 +195,21 @@ def is_growth_sheet(sheet_name) -> bool:
     return normalize_key(sheet_name) == "growth"
 
 
-def growth_variable_with_percent(value):
+def is_financial_health_sheet(sheet_name) -> bool:
+    return normalize_key(sheet_name) == "financial health"
+
+
+def is_cash_flow_ratios_sheet(sheet_name) -> bool:
     """
-    Si la variable de la hoja Growth es:
-    Year Over Year
-    3-Year Average
-    5-Year Average
-    10-Year Average
-    Year Average
-
-    devuelve el nombre con %.
-    Si ya tiene %, no lo duplica.
+    Detecta la hoja Ratios de Cash Flow.
+    Tolera nombres parecidos.
     """
-    text = normalize_text(value)
-
-    if not text:
-        return text
-
-    key = normalize_key(text)
-
-    # Si ya termina en %, comparar quitando %
-    if key.endswith("%"):
-        key_without_percent = key[:-1].strip()
-        if key_without_percent in GROWTH_PERCENT_VARIABLES:
-            return GROWTH_PERCENT_VARIABLES[key_without_percent]
-        return text
-
-    if key in GROWTH_PERCENT_VARIABLES:
-        return GROWTH_PERCENT_VARIABLES[key]
-
-    return text
+    key = normalize_key(sheet_name)
+    return key in {
+        "ratios de cash flow",
+        "cash flow ratios",
+        "ratios cash flow",
+    }
 
 
 def variable_name_ends_with_percent(variable_name) -> bool:
@@ -224,6 +218,40 @@ def variable_name_ends_with_percent(variable_name) -> bool:
 
 def is_absolute_value_exception(variable_name) -> bool:
     return normalize_key(variable_name) in ABSOLUTE_VALUE_VARIABLE_EXCEPTIONS
+
+
+# ============================================================
+# RENOMBRAMIENTO DE VARIABLES EN COLUMNA A
+# ============================================================
+
+def rename_variable_for_sheet(sheet_name, variable_name):
+    """
+    Renombra variables específicas en columna A según la hoja.
+    Evita duplicar % si ya fue renombrada.
+    """
+    original = normalize_text(variable_name)
+    key = normalize_key(original)
+
+    if not original:
+        return original
+
+    # Si ya termina en %, se compara quitando el último %
+    # para evitar duplicación accidental.
+    key_without_final_percent = key[:-1].strip() if key.endswith("%") else key
+
+    if is_growth_sheet(sheet_name):
+        if key_without_final_percent in GROWTH_PERCENT_VARIABLES:
+            return GROWTH_PERCENT_VARIABLES[key_without_final_percent]
+
+    if is_financial_health_sheet(sheet_name):
+        if key_without_final_percent in FINANCIAL_HEALTH_RENAMES:
+            return FINANCIAL_HEALTH_RENAMES[key_without_final_percent]
+
+    if is_cash_flow_ratios_sheet(sheet_name):
+        if key_without_final_percent in CASH_FLOW_RATIO_RENAMES:
+            return CASH_FLOW_RATIO_RENAMES[key_without_final_percent]
+
+    return original
 
 
 # ============================================================
@@ -313,17 +341,14 @@ def percent_to_decimal(number):
     return number / 100
 
 
-def should_treat_as_percent(sheet_name, variable_name, parsed_status) -> bool:
+def should_treat_as_percent(variable_name, parsed_status) -> bool:
     """
-    Regla corregida:
-
+    Reglas:
     1. Si la variable está en excepciones absolutas, NO es porcentaje.
     2. Si la variable termina en %, SÍ es porcentaje.
-       Esto cubre Growth porque primero renombramos:
-       Year Over Year -> Year Over Year %
     3. Si el valor trae explícitamente símbolo %, SÍ es porcentaje,
        salvo excepción absoluta.
-    4. NO usamos el formato visual de Excel como criterio.
+    4. NO usa el formato visual de Excel como criterio.
     """
 
     if is_absolute_value_exception(variable_name):
@@ -352,32 +377,18 @@ def apply_standard_number_format(cell, value):
             cell.number_format = NUMBER_FORMAT
 
 
-def clean_header_cell(cell, cleaning_log, sheet_name):
+def clean_header_cell(cell):
+    """
+    Limpia encabezados y corrige años.
+    """
     original = cell.value
 
     if is_year_like(original):
-        new_value = to_year(original)
-        cell.value = new_value
+        cell.value = to_year(original)
         cell.number_format = YEAR_FORMAT
-        cleaning_log.append([
-            sheet_name,
-            cell.coordinate,
-            "header_year_standardized",
-            original,
-            new_value,
-        ])
 
     elif isinstance(original, str):
-        cleaned = normalize_text(original)
-        if cleaned != original:
-            cell.value = cleaned
-            cleaning_log.append([
-                sheet_name,
-                cell.coordinate,
-                "header_text_cleaned",
-                original,
-                cleaned,
-            ])
+        cell.value = normalize_text(original)
 
     cell.font = Font(bold=True)
     cell.fill = PatternFill("solid", fgColor="D9EAF7")
@@ -388,84 +399,53 @@ def clean_header_cell(cell, cleaning_log, sheet_name):
 # LIMPIEZA DE HOJA
 # ============================================================
 
-def clean_sheet(ws, cleaning_log, missing_log, structure_log):
+def clean_sheet(ws):
     max_row = ws.max_row
     max_col = ws.max_column
 
     if max_row == 0 or max_col == 0:
-        structure_log.append([ws.title, max_row, max_col, "empty_or_invalid"])
         return
 
     # --------------------------------------------------------
     # 1. Limpiar encabezados de columnas
     # --------------------------------------------------------
     for col in range(1, max_col + 1):
-        clean_header_cell(ws.cell(row=1, column=col), cleaning_log, ws.title)
+        clean_header_cell(ws.cell(row=1, column=col))
 
     # --------------------------------------------------------
-    # 2. PRIMERO renombrar variables de la hoja Growth en columna A
-    #    antes de convertir formatos numéricos.
+    # 2. Renombrar variables específicas en columna A ANTES
+    #    de procesar valores numéricos
     # --------------------------------------------------------
-    if is_growth_sheet(ws.title):
-        for row in range(1, max_row + 1):
-            variable_cell = ws.cell(row=row, column=1)
-            original_value = variable_cell.value
+    for row in range(1, max_row + 1):
+        variable_cell = ws.cell(row=row, column=1)
+        original_variable_name = variable_cell.value
 
-            if isinstance(original_value, str):
-                cleaned_value = normalize_text(original_value)
-                renamed_value = growth_variable_with_percent(cleaned_value)
-
-                if renamed_value != original_value:
-                    variable_cell.value = renamed_value
-                    cleaning_log.append([
-                        ws.title,
-                        variable_cell.coordinate,
-                        "growth_variable_percent_suffix_added",
-                        original_value,
-                        renamed_value,
-                    ])
+        if isinstance(original_variable_name, str):
+            renamed_variable = rename_variable_for_sheet(ws.title, original_variable_name)
+            variable_cell.value = renamed_variable
 
     # --------------------------------------------------------
     # 3. Limpiar filas y valores
     # --------------------------------------------------------
     for row in range(1, max_row + 1):
         variable_cell = ws.cell(row=row, column=1)
-        original_variable_name = variable_cell.value
+        variable_name = variable_cell.value
 
-        # Limpiar nombre de variable en primera columna
-        if isinstance(original_variable_name, str):
-            cleaned_variable_name = normalize_text(original_variable_name)
-            if cleaned_variable_name != original_variable_name:
-                variable_cell.value = cleaned_variable_name
-                cleaning_log.append([
-                    ws.title,
-                    variable_cell.coordinate,
-                    "variable_name_cleaned",
-                    original_variable_name,
-                    cleaned_variable_name,
-                ])
-        else:
-            cleaned_variable_name = original_variable_name
+        # Limpiar nombre de variable en columna A
+        if isinstance(variable_name, str):
+            variable_name = normalize_text(variable_name)
+            variable_cell.value = variable_name
 
-        # Corregir años en cualquier celda del cuerpo
+        # Corregir años en cualquier celda
         for col in range(1, max_col + 1):
             cell = ws.cell(row=row, column=col)
             original_value = cell.value
 
             if is_year_like(original_value):
-                new_value = to_year(original_value)
-                if original_value != new_value or cell.number_format != YEAR_FORMAT:
-                    cell.value = new_value
-                    cell.number_format = YEAR_FORMAT
-                    cleaning_log.append([
-                        ws.title,
-                        cell.coordinate,
-                        "year_cell_standardized",
-                        original_value,
-                        new_value,
-                    ])
+                cell.value = to_year(original_value)
+                cell.number_format = YEAR_FORMAT
 
-        # Procesar valores de datos desde columna 2
+        # Procesar valores desde columna 2
         for col in range(2, max_col + 1):
             cell = ws.cell(row=row, column=col)
             original_value = cell.value
@@ -477,94 +457,36 @@ def clean_sheet(ws, cleaning_log, missing_log, structure_log):
             # Vacíos
             if is_blank(original_value):
                 cell.value = MISSING_LABEL
-                missing_log.append([
-                    ws.title,
-                    cell.coordinate,
-                    normalize_text(cleaned_variable_name),
-                    "blank",
-                    MISSING_LABEL,
-                ])
                 continue
 
             # NA / guiones
             if is_na_like(original_value):
                 cell.value = NOT_AVAILABLE_LABEL
-                missing_log.append([
-                    ws.title,
-                    cell.coordinate,
-                    normalize_text(cleaned_variable_name),
-                    "not_available_or_not_applicable",
-                    NOT_AVAILABLE_LABEL,
-                ])
                 continue
 
             # Años en cuerpo
             if is_year_like(original_value):
-                new_value = to_year(original_value)
-                cell.value = new_value
+                cell.value = to_year(original_value)
                 cell.number_format = YEAR_FORMAT
-                cleaning_log.append([
-                    ws.title,
-                    cell.coordinate,
-                    "year_body_standardized",
-                    original_value,
-                    new_value,
-                ])
                 continue
 
             parsed_value, status = parse_numeric(original_value)
 
+            # Números
             if status in {"numeric", "numeric_text", "percent_text"} and isinstance(parsed_value, (int, float)):
 
-                percent_context = should_treat_as_percent(
-                    sheet_name=ws.title,
-                    variable_name=cleaned_variable_name,
-                    parsed_status=status,
-                )
-
-                if percent_context:
+                if should_treat_as_percent(variable_name, status):
                     new_value = percent_to_decimal(parsed_value)
                     cell.value = new_value
                     cell.number_format = PERCENT_NUMBER_FORMAT
-
-                    cleaning_log.append([
-                        ws.title,
-                        cell.coordinate,
-                        "percent_standardized_decimal",
-                        original_value,
-                        new_value,
-                    ])
 
                 else:
                     cell.value = parsed_value
                     apply_standard_number_format(cell, parsed_value)
 
-                    if status == "percent_text":
-                        action = "percent_text_kept_absolute_due_exception_or_context"
-                    elif status == "numeric_text":
-                        action = "numeric_text_to_number"
-                    else:
-                        action = "numeric_standardized"
-
-                    cleaning_log.append([
-                        ws.title,
-                        cell.coordinate,
-                        action,
-                        original_value,
-                        parsed_value,
-                    ])
-
+            # Texto normal
             elif status == "text":
-                cleaned_text = normalize_text(parsed_value)
-                if cleaned_text != original_value:
-                    cell.value = cleaned_text
-                    cleaning_log.append([
-                        ws.title,
-                        cell.coordinate,
-                        "text_cleaned",
-                        original_value,
-                        cleaned_text,
-                    ])
+                cell.value = normalize_text(parsed_value)
 
     # --------------------------------------------------------
     # 4. Formato visual básico
@@ -572,45 +494,10 @@ def clean_sheet(ws, cleaning_log, missing_log, structure_log):
     ws.freeze_panes = "B2"
     ws.auto_filter.ref = ws.dimensions
 
-    ws.column_dimensions["A"].width = 55
+    ws.column_dimensions["A"].width = 60
 
     for col in range(2, max_col + 1):
         ws.column_dimensions[get_column_letter(col)].width = 18
-
-    structure_log.append([
-        ws.title,
-        max_row,
-        max_col,
-        "processed",
-    ])
-
-
-# ============================================================
-# HOJAS DE LOG
-# ============================================================
-
-def create_log_sheet(wb, sheet_name, headers, rows, header_fill):
-    if sheet_name in wb.sheetnames:
-        del wb[sheet_name]
-
-    ws = wb.create_sheet(sheet_name)
-    ws.append(headers)
-
-    for row in rows:
-        ws.append(row)
-
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=header_fill)
-        cell.alignment = Alignment(horizontal="center")
-
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-
-    for col in range(1, len(headers) + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 34
-
-    return ws
 
 
 # ============================================================
@@ -623,53 +510,20 @@ def main():
 
     wb = load_workbook(INPUT_FILE)
 
-    # Eliminar logs anteriores si existen
-    for sheet_name in list(SKIP_SHEETS):
+    # Eliminar hojas de logs si existieran de ejecuciones anteriores
+    for sheet_name in ["Data_Cleaning_Log", "Missing_Data_Log", "Structure_Log"]:
         if sheet_name in wb.sheetnames:
             del wb[sheet_name]
 
-    cleaning_log = []
-    missing_log = []
-    structure_log = []
-
     for ws in wb.worksheets:
-        if ws.title in SKIP_SHEETS:
-            continue
-
-        clean_sheet(ws, cleaning_log, missing_log, structure_log)
-
-    create_log_sheet(
-        wb,
-        "Data_Cleaning_Log",
-        ["Sheet", "Cell", "Action", "Original Value", "New Value"],
-        cleaning_log,
-        "1F4E78",
-    )
-
-    create_log_sheet(
-        wb,
-        "Missing_Data_Log",
-        ["Sheet", "Cell", "Variable", "Missing Type", "Assigned Label"],
-        missing_log,
-        "9C0006",
-    )
-
-    create_log_sheet(
-        wb,
-        "Structure_Log",
-        ["Sheet", "Rows", "Columns", "Status"],
-        structure_log,
-        "548235",
-    )
+        clean_sheet(ws)
 
     wb.save(OUTPUT_FILE)
 
     print("Limpieza completada correctamente.")
     print(f"Archivo original: {INPUT_FILE}")
     print(f"Archivo limpio:   {OUTPUT_FILE}")
-    print(f"Cambios registrados: {len(cleaning_log)}")
-    print(f"Datos faltantes / no disponibles registrados: {len(missing_log)}")
-    print(f"Hojas procesadas: {len(structure_log)}")
+    print("No se generaron hojas de logs.")
 
 
 if __name__ == "__main__":
