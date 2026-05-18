@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
-from openpyxl import load_workbook
+import pandas as pd
+
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
@@ -9,11 +11,35 @@ from openpyxl.utils import get_column_letter
 # CONFIGURACIÓN PRINCIPAL
 # ============================================================
 
-INPUT_FILE = Path(
-    "/mnt/c/Users/Alvaro/OneDrive/Documentos/Curso MIT McKinseay IFP/Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-13/Salesforce CRM 2026-05-14.xlsx"
+BASE_DIR = Path(
+    "/mnt/c/Users/Alvaro/OneDrive/Documentos/Curso MIT McKinseay IFP/"
+    "Inversiones Stocks/Analisis Morningstar Barbell - Quality Value Defensive 2026-05-13/"
+    "Arista ANE"
 )
 
-OUTPUT_FILE = INPUT_FILE.with_name(INPUT_FILE.stem + " CLEAN STANDARDIZED.xlsx")
+SOURCE_SHEETS_ORDER = [
+    "Income Statement",
+    "Balance Sheet",
+    "Cash Flow Statement",
+    "Financial Summary",
+    "Growth",
+    "Profitability and Efficiency",
+    "Financial Health",
+    "Ratio of Cash Flow",
+    "Trailing Returns",
+    "Valuation",
+]
+
+# IMPORTANTE:
+# Archivos fuente .xls
+SOURCE_FILES = {
+    sheet_name: BASE_DIR / f"{sheet_name}.xls"
+    for sheet_name in SOURCE_SHEETS_ORDER
+}
+
+# IMPORTANTE:
+# Archivo final .xlsx
+OUTPUT_FILE = BASE_DIR / "Arista ANET 2026-05-17.xlsx"
 
 MISSING_LABEL = "NA_MISSING"
 NOT_AVAILABLE_LABEL = "NA_NOT_AVAILABLE"
@@ -31,7 +57,6 @@ YEAR_FORMAT = "0"
 # REGLAS DE RENOMBRAMIENTO DE VARIABLES
 # ============================================================
 
-# Hoja Growth: variables de columna A que deben convertirse en porcentuales.
 GROWTH_PERCENT_VARIABLES = {
     "year over year": "Year Over Year %",
     "3-year average": "3-Year Average %",
@@ -40,12 +65,10 @@ GROWTH_PERCENT_VARIABLES = {
     "year average": "Year Average %",
 }
 
-# Hoja Financial Health
 FINANCIAL_HEALTH_RENAMES = {
     "cap ex as a % of sales": "Cap Ex as a % of Sales %",
 }
 
-# Hoja Ratios de Cash Flow
 CASH_FLOW_RATIO_RENAMES = {
     "operating cash flow growth % yoy": "Operating Cash Flow Growth % YOY %",
     "free cash flow growth % yoy": "Free Cash Flow Growth % YOY %",
@@ -109,24 +132,30 @@ ABSOLUTE_VALUE_VARIABLE_EXCEPTIONS = {
 
 def normalize_text(value) -> str:
     """Normaliza textos: espacios, NBSP, saltos, etc."""
+
     if value is None:
         return ""
+
     text = str(value)
     text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text)
+
     return text.strip()
 
 
 def normalize_key(value) -> str:
     """Normaliza para comparar nombres de variables, columnas y hojas."""
+
     return normalize_text(value).lower()
 
 
 def is_blank(value) -> bool:
     if value is None:
         return True
+
     if isinstance(value, str) and normalize_text(value) == "":
         return True
+
     return False
 
 
@@ -135,6 +164,7 @@ def is_na_like(value) -> bool:
         return False
 
     text = normalize_key(value)
+
     return text in {
         "-",
         "—",
@@ -160,6 +190,7 @@ def is_year_like(value) -> bool:
     "2026"
     "2026.00"
     """
+
     if value is None:
         return False
 
@@ -172,6 +203,7 @@ def is_year_like(value) -> bool:
     if isinstance(value, str):
         text = normalize_text(value)
         match = re.fullmatch(r"(20\d{2})(\.0+)?", text)
+
         if match:
             year = int(match.group(1))
             return MIN_YEAR <= year <= MAX_YEAR
@@ -185,6 +217,7 @@ def to_year(value):
 
     text = normalize_text(value)
     match = re.search(r"20\d{2}", text)
+
     if match:
         return int(match.group(0))
 
@@ -204,11 +237,14 @@ def is_cash_flow_ratios_sheet(sheet_name) -> bool:
     Detecta la hoja Ratios de Cash Flow.
     Tolera nombres parecidos.
     """
+
     key = normalize_key(sheet_name)
+
     return key in {
         "ratios de cash flow",
         "cash flow ratios",
         "ratios cash flow",
+        "ratios of cash flow",
     }
 
 
@@ -229,14 +265,13 @@ def rename_variable_for_sheet(sheet_name, variable_name):
     Renombra variables específicas en columna A según la hoja.
     Evita duplicar % si ya fue renombrada.
     """
+
     original = normalize_text(variable_name)
     key = normalize_key(original)
 
     if not original:
         return original
 
-    # Si ya termina en %, se compara quitando el último %
-    # para evitar duplicación accidental.
     key_without_final_percent = key[:-1].strip() if key.endswith("%") else key
 
     if is_growth_sheet(sheet_name):
@@ -313,6 +348,7 @@ def parse_numeric(value):
 
     try:
         number = float(cleaned)
+
         if negative:
             number = -number
 
@@ -332,6 +368,7 @@ def percent_to_decimal(number):
     0.2587 -> 0.2587
     -12.5 -> -0.125
     """
+
     if not isinstance(number, (int, float)):
         return number
 
@@ -348,7 +385,6 @@ def should_treat_as_percent(variable_name, parsed_status) -> bool:
     2. Si la variable termina en %, SÍ es porcentaje.
     3. Si el valor trae explícitamente símbolo %, SÍ es porcentaje,
        salvo excepción absoluta.
-    4. NO usa el formato visual de Excel como criterio.
     """
 
     if is_absolute_value_exception(variable_name):
@@ -370,6 +406,7 @@ def should_treat_as_percent(variable_name, parsed_status) -> bool:
 def apply_standard_number_format(cell, value):
     if isinstance(value, int):
         cell.number_format = INTEGER_FORMAT
+
     elif isinstance(value, float):
         if value.is_integer():
             cell.number_format = INTEGER_FORMAT
@@ -381,6 +418,7 @@ def clean_header_cell(cell):
     """
     Limpia encabezados y corrige años.
     """
+
     original = cell.value
 
     if is_year_like(original):
@@ -393,6 +431,76 @@ def clean_header_cell(cell):
     cell.font = Font(bold=True)
     cell.fill = PatternFill("solid", fgColor="D9EAF7")
     cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+# ============================================================
+# CONSOLIDACIÓN INICIAL DE ARCHIVOS .XLS
+# ============================================================
+
+def copy_source_sheet_to_target(source_file, target_wb, target_sheet_name):
+    """
+    Lee un archivo .xls con pandas/xlrd y lo copia como hoja
+    dentro del workbook final .xlsx.
+    """
+
+    if not source_file.exists():
+        raise FileNotFoundError(
+            f"No se encontró el archivo fuente: {source_file}"
+        )
+
+    df = pd.read_excel(
+        source_file,
+        header=None,
+        engine="xlrd"
+    )
+
+    target_ws = target_wb.create_sheet(
+        title=target_sheet_name
+    )
+
+    for row_idx, row in df.iterrows():
+        for col_idx, value in enumerate(row, start=1):
+
+            if pd.isna(value):
+                value = None
+
+            target_ws.cell(
+                row=row_idx + 1,
+                column=col_idx,
+                value=value
+            )
+
+    return target_ws
+
+
+def build_consolidated_workbook():
+    """
+    Construye un workbook en memoria consolidando los 10 archivos .xls
+    en el orden definido por SOURCE_SHEETS_ORDER.
+    """
+
+    wb = Workbook()
+
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    print("\n============================================================")
+    print("CONSOLIDANDO ARCHIVOS FUENTE .XLS")
+    print("============================================================")
+
+    for sheet_name in SOURCE_SHEETS_ORDER:
+        source_file = SOURCE_FILES[sheet_name]
+
+        print(f"Agregando hoja: {sheet_name}")
+        print(f"Archivo fuente: {source_file}")
+
+        copy_source_sheet_to_target(
+            source_file=source_file,
+            target_wb=wb,
+            target_sheet_name=sheet_name
+        )
+
+    return wb
 
 
 # ============================================================
@@ -409,6 +517,7 @@ def clean_sheet(ws):
     # --------------------------------------------------------
     # 1. Limpiar encabezados de columnas
     # --------------------------------------------------------
+
     for col in range(1, max_col + 1):
         clean_header_cell(ws.cell(row=1, column=col))
 
@@ -416,17 +525,23 @@ def clean_sheet(ws):
     # 2. Renombrar variables específicas en columna A ANTES
     #    de procesar valores numéricos
     # --------------------------------------------------------
+
     for row in range(1, max_row + 1):
         variable_cell = ws.cell(row=row, column=1)
         original_variable_name = variable_cell.value
 
         if isinstance(original_variable_name, str):
-            renamed_variable = rename_variable_for_sheet(ws.title, original_variable_name)
+            renamed_variable = rename_variable_for_sheet(
+                ws.title,
+                original_variable_name
+            )
+
             variable_cell.value = renamed_variable
 
     # --------------------------------------------------------
     # 3. Limpiar filas y valores
     # --------------------------------------------------------
+
     for row in range(1, max_row + 1):
         variable_cell = ws.cell(row=row, column=1)
         variable_name = variable_cell.value
@@ -473,7 +588,10 @@ def clean_sheet(ws):
             parsed_value, status = parse_numeric(original_value)
 
             # Números
-            if status in {"numeric", "numeric_text", "percent_text"} and isinstance(parsed_value, (int, float)):
+            if (
+                status in {"numeric", "numeric_text", "percent_text"}
+                and isinstance(parsed_value, (int, float))
+            ):
 
                 if should_treat_as_percent(variable_name, status):
                     new_value = percent_to_decimal(parsed_value)
@@ -491,6 +609,7 @@ def clean_sheet(ws):
     # --------------------------------------------------------
     # 4. Formato visual básico
     # --------------------------------------------------------
+
     ws.freeze_panes = "B2"
     ws.auto_filter.ref = ws.dimensions
 
@@ -505,24 +624,29 @@ def clean_sheet(ws):
 # ============================================================
 
 def main():
-    if not INPUT_FILE.exists():
-        raise FileNotFoundError(f"No se encontró el archivo: {INPUT_FILE}")
-
-    wb = load_workbook(INPUT_FILE)
+    wb = build_consolidated_workbook()
 
     # Eliminar hojas de logs si existieran de ejecuciones anteriores
-    for sheet_name in ["Data_Cleaning_Log", "Missing_Data_Log", "Structure_Log"]:
+    for sheet_name in [
+        "Data_Cleaning_Log",
+        "Missing_Data_Log",
+        "Structure_Log",
+    ]:
         if sheet_name in wb.sheetnames:
             del wb[sheet_name]
 
+    print("\n============================================================")
+    print("LIMPIANDO Y ESTANDARIZANDO HOJAS")
+    print("============================================================")
+
     for ws in wb.worksheets:
+        print(f"Limpiando hoja: {ws.title}")
         clean_sheet(ws)
 
     wb.save(OUTPUT_FILE)
 
-    print("Limpieza completada correctamente.")
-    print(f"Archivo original: {INPUT_FILE}")
-    print(f"Archivo limpio:   {OUTPUT_FILE}")
+    print("\nLimpieza completada correctamente.")
+    print(f"Archivo limpio: {OUTPUT_FILE}")
     print("No se generaron hojas de logs.")
 
 
